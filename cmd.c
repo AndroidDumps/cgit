@@ -201,6 +201,22 @@ struct cgit_cmd *cgit_get_cmd(void)
 			ctx.qry.page = "repolist";
 	}
 
+	/*
+	 * dumps: read-only browsing of multi-GB single-commit firmware repos.
+	 * Default-deny: only these pages are served. Diff-type pages (log,
+	 * commit, diff, patch, stats, blame, ...) cost ~60s of CPU each on a
+	 * dump's root commit, snapshots are huge, and clones are served by
+	 * git-http-backend, not cgit. New upstream pages stay off by default.
+	 */
+	static const char *const allowed[] = {
+		"plain", "refs", "repolist", "summary", "tag", "tree",
+	};
+	for (i = 0; i < sizeof(allowed)/sizeof(*allowed); i++)
+		if (!strcmp(ctx.qry.page, allowed[i]))
+			break;
+	if (i == sizeof(allowed)/sizeof(*allowed))
+		return NULL;
+
 	for (i = 0; i < sizeof(cmds)/sizeof(*cmds); i++)
 		if (!strcmp(ctx.qry.page, cmds[i].name))
 			return &cmds[i];

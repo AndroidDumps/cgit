@@ -86,12 +86,16 @@ static void print_binary_buffer(char *buf, unsigned long size)
 	html("</table>\n");
 }
 
+/*
+ * dumps: check the size before reading the blob (upstream read it fully
+ * first), and don't hex-dump binaries: firmware dumps are mostly binary and
+ * the dump turns every 32 bytes into a line of HTML. Link to plain instead.
+ */
 static void print_object(const struct object_id *oid, const char *path, const char *basename, const char *rev)
 {
 	enum object_type type;
-	char *buf;
+	char *buf, *mimetype;
 	unsigned long size;
-	bool is_binary;
 
 	type = odb_read_object_info(the_repository->objects, oid, &size);
 	if (type == OBJ_BAD) {
@@ -100,38 +104,49 @@ static void print_object(const struct object_id *oid, const char *path, const ch
 		return;
 	}
 
-	buf = odb_read_object(the_repository->objects, oid, &type, &size);
-	if (!buf) {
-		cgit_print_error_page(500, "Internal server error",
-			"Error reading object %s", oid_to_hex(oid));
-		return;
-	}
-	is_binary = buffer_is_binary(buf, size);
-
 	cgit_set_title_from_path(path);
 
 	cgit_print_layout_start();
 	htmlf("blob: %s (", oid_to_hex(oid));
 	cgit_plain_link("plain", NULL, NULL, ctx.qry.head,
 		        rev, path);
-	if (ctx.repo->enable_blame && !is_binary) {
-		html(") (");
-		cgit_blame_link("blame", NULL, NULL, ctx.qry.head,
-			        rev, path);
-	}
 	html(")\n");
 
 	if (ctx.cfg.max_blob_size && size / 1024 > ctx.cfg.max_blob_size) {
-		htmlf("<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB).</div>",
+		htmlf("<div class='error'>blob size (%ldKB) exceeds display size limit (%dKB). Use the plain link to download it.</div>",
 				size / 1024, ctx.cfg.max_blob_size);
 		return;
 	}
 
-	if (is_binary)
-		print_binary_buffer(buf, size);
+	buf = odb_read_object(the_repository->objects, oid, &type, &size);
+	if (!buf) {
+		html("<div class='error'>Error reading object</div>");
+		return;
+	}
+
+	mimetype = get_mimetype_for_filename(path);
+	if (mimetype && starts_with(mimetype, "image/")) {
+		/* dumps: show images inline (served by plain, which sends nosniff
+		 * and a default-src 'none' CSP; <img> never runs SVG scripts). */
+		html("<div class='blob-image'><img alt='' src='");
+		html_url_path(ctx.cfg.virtual_root ? ctx.cfg.virtual_root : "/");
+		html_url_path(ctx.repo->url);
+		html("/plain/");
+		html_url_path(path);
+		html("?h=");
+		html_url_arg(ctx.qry.head);
+		if (rev && strcmp(rev, ctx.qry.head)) {
+			html("&amp;id=");
+			html_url_arg(rev);
+		}
+		html("'/></div>");
+	} else if (buffer_is_binary(buf, size))
+		htmlf("<div class='error'>Binary file (%ldKB). Use the plain link to download it.</div>",
+		      size / 1024);
 	else
 		print_text_buffer(basename, buf, size);
 
+	free(mimetype);
 	free(buf);
 }
 
@@ -260,12 +275,6 @@ static int ls_item(const struct object_id *oid, struct strbuf *base,
 	htmlf("</td><td class='ls-size'>%li</td>", size);
 
 	html("<td>");
-	cgit_log_link("log", NULL, "button", ctx.qry.head,
-		      walk_tree_ctx->curr_rev, fullpath.buf, 0, NULL, NULL,
-		      ctx.qry.showmsg, 0);
-	if (ctx.repo->max_stats)
-		cgit_stats_link("stats", NULL, "button", ctx.qry.head,
-				fullpath.buf);
 	if (!S_ISGITLINK(mode))
 		cgit_plain_link("plain", NULL, "button", ctx.qry.head,
 				walk_tree_ctx->curr_rev, fullpath.buf);

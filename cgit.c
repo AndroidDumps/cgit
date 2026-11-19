@@ -29,6 +29,13 @@ static void constructor_environment()
 	setenv("GIT_ATTR_NOSYSTEM", "1", 1);
 	unsetenv("HOME");
 	unsetenv("XDG_CONFIG_HOME");
+	/*
+	 * dumps: git only streams packed blobs larger than
+	 * core.bigFileThreshold (default 512m) and reads anything smaller
+	 * whole. Lower it so the streaming plain handler in ui-plain.c keeps
+	 * memory flat for the multi-hundred-MB files in firmware dumps.
+	 */
+	setenv("GIT_CONFIG_PARAMETERS", "'core.bigfilethreshold'='1m'", 0);
 }
 
 static void add_mimetype(const char *name, const char *value)
@@ -592,6 +599,77 @@ static void prepare_repo_env(int *nongit)
 	load_display_notes(NULL);
 }
 
+/*
+ * dumps: GitLab-style "/<repo>/tree/<ref>/<path>" (and plain) links were
+ * posted all over while the archive ran on GitLab. When neither ?h= nor
+ * ?id= is given and the first path component names an existing branch or
+ * tag, redirect to the canonical "/<repo>/<page>/<path>?h=<ref>". cgit's own
+ * links always carry h= (see repolink()), so they never take this path.
+ * Returns 1 if a redirect was sent.
+ */
+static int redirect_ref_in_path(void)
+{
+	struct ref_store *refs = get_main_ref_store(the_repository);
+	struct strbuf first = STRBUF_INIT, rest = STRBUF_INIT, ref = STRBUF_INIT;
+	const char *p, *head = NULL;
+	int is_branch, is_tag, ret = 0;
+
+	if (ctx.qry.head || ctx.qry.oid || !ctx.qry.path || !ctx.cfg.virtual_root ||
+	    !ctx.qry.page ||
+	    (strcmp(ctx.qry.page, "tree") && strcmp(ctx.qry.page, "plain")))
+		return 0;
+
+	/* Split into first component and the rest, dropping empty components. */
+	for (p = ctx.qry.path; *p; ) {
+		const char *end = strchrnul(p, '/');
+		if (end > p) {
+			if (!first.len)
+				strbuf_add(&first, p, end - p);
+			else {
+				if (rest.len)
+					strbuf_addch(&rest, '/');
+				strbuf_add(&rest, p, end - p);
+			}
+		}
+		p = *end ? end + 1 : end;
+	}
+	if (!first.len)
+		goto out;
+
+	strbuf_addf(&ref, "refs/heads/%s", first.buf);
+	is_branch = refs_ref_exists(refs, ref.buf);
+	strbuf_reset(&ref);
+	strbuf_addf(&ref, "refs/tags/%s", first.buf);
+	is_tag = refs_ref_exists(refs, ref.buf);
+	if (is_branch && is_tag) {
+		/* Ambiguous short name: pin the branch explicitly. */
+		strbuf_reset(&ref);
+		strbuf_addf(&ref, "refs/heads/%s", first.buf);
+		head = ref.buf;
+	} else if (is_branch || is_tag)
+		head = first.buf;
+	else
+		goto out;
+
+	html("Status: 301 Moved\n");
+	html("Location: ");
+	html_url_path(ctx.cfg.virtual_root);
+	html_url_path(ctx.repo->url);
+	html("/");
+	html_url_path(ctx.qry.page);
+	html("/");
+	html_url_path(rest.buf);
+	html("?h=");
+	html_url_arg(head);
+	html("\n\n");
+	ret = 1;
+out:
+	strbuf_release(&first);
+	strbuf_release(&rest);
+	strbuf_release(&ref);
+	return ret;
+}
+
 static int prepare_repo_cmd(int nongit)
 {
 	struct object_id oid;
@@ -615,6 +693,9 @@ static int prepare_repo_cmd(int nongit)
 
 	if (!ctx.repo->defbranch)
 		ctx.repo->defbranch = guess_defbranch();
+
+	if (redirect_ref_in_path())
+		return 1;
 
 	if (!ctx.qry.head) {
 		ctx.qry.nohead = 1;

@@ -101,8 +101,13 @@ static int is_in_url(struct cgit_repo *repo)
 {
 	if (!ctx.qry.url)
 		return 1;
-	if (repo->url && starts_with(repo->url, ctx.qry.url))
-		return 1;
+	/* dumps: match whole path components, so "dumps/xiaomi" does not
+	 * also list "dumps/xiaomipad/...". */
+	if (repo->url && starts_with(repo->url, ctx.qry.url)) {
+		size_t n = strlen(ctx.qry.url);
+		if (!n || ctx.qry.url[n - 1] == '/' || repo->url[n] == '/' || !repo->url[n])
+			return 1;
+	}
 	return 0;
 }
 
@@ -315,7 +320,16 @@ void cgit_print_repolist(void)
 		     strcmp(section, last_section)))) {
 			htmlf("<tr class='nohover-highlight'><td colspan='%d' class='reposection'>",
 			      columns);
-			html_txt(section);
+			/* dumps: section headers link to the group page (/<section>/). */
+			if (ctx.cfg.virtual_root) {
+				html("<a href='");
+				html_url_path(ctx.cfg.virtual_root);
+				html_url_path(section);
+				html("/'>");
+				html_txt(section);
+				html("</a>");
+			} else
+				html_txt(section);
 			html("</td></tr>");
 			last_section = section;
 		}
@@ -353,8 +367,6 @@ void cgit_print_repolist(void)
 		if (ctx.cfg.enable_index_links) {
 			html("<td>");
 			cgit_summary_link("summary", NULL, "button", NULL);
-			cgit_log_link("log", NULL, "button", NULL, NULL, NULL,
-				      0, NULL, NULL, ctx.qry.showmsg, 0);
 			cgit_tree_link("tree", NULL, "button", NULL, NULL, NULL);
 			html("</td>");
 		}

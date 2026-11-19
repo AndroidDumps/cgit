@@ -304,7 +304,9 @@ static char *repolink(const char *title, const char *class, const char *page,
 		}
 		delim = "&amp;";
 	}
-	if (head && ctx.repo->defbranch && strcmp(head, ctx.repo->defbranch)) {
+	/* dumps: always pin the ref so a path can never be read as a ref
+	 * (see redirect_ref_in_path() in cgit.c). */
+	if (head) {
 		html(delim);
 		html("h=");
 		html_url_arg(head);
@@ -365,86 +367,21 @@ void cgit_log_link(const char *name, const char *title, const char *class,
 		   int ofs, const char *grep, const char *pattern, int showmsg,
 		   int follow)
 {
-	char *delim;
-
-	delim = repolink(title, class, "log", head, path);
-	if (rev && ctx.qry.head && strcmp(rev, ctx.qry.head)) {
-		html(delim);
-		html("id=");
-		html_url_arg(rev);
-		delim = "&amp;";
-	}
-	if (grep && pattern) {
-		html(delim);
-		html("qt=");
-		html_url_arg(grep);
-		delim = "&amp;";
-		html(delim);
-		html("q=");
-		html_url_arg(pattern);
-	}
-	if (ofs > 0) {
-		html(delim);
-		html("ofs=");
-		htmlf("%d", ofs);
-		delim = "&amp;";
-	}
-	if (showmsg) {
-		html(delim);
-		html("showmsg=1");
-		delim = "&amp;";
-	}
-	if (follow) {
-		html(delim);
-		html("follow=1");
-	}
-	html("'>");
-	html_txt(name);
-	html("</a>");
+	/* dumps: no log page; point at the tree instead. */
+	reporevlink("tree", name, title, class, head, NULL, path);
 }
 
 void cgit_commit_link(const char *name, const char *title, const char *class,
 		      const char *head, const char *rev, const char *path)
 {
-	char *delim;
-
-	delim = repolink(title, class, "commit", head, path);
-	if (rev && ctx.qry.head && strcmp(rev, ctx.qry.head)) {
-		html(delim);
-		html("id=");
-		html_url_arg(rev);
-		delim = "&amp;";
-	}
-	if (ctx.qry.difftype) {
-		html(delim);
-		htmlf("dt=%d", ctx.qry.difftype);
-		delim = "&amp;";
-	}
-	if (ctx.qry.context > 0 && ctx.qry.context != 3) {
-		html(delim);
-		html("context=");
-		htmlf("%d", ctx.qry.context);
-		delim = "&amp;";
-	}
-	if (ctx.qry.ignorews) {
-		html(delim);
-		html("ignorews=1");
-		delim = "&amp;";
-	}
-	if (ctx.qry.follow) {
-		html(delim);
-		html("follow=1");
-	}
-	html("'>");
-	if (name[0] != '\0') {
-		if (strlen(name) > ctx.cfg.max_msg_len && ctx.cfg.max_msg_len >= 15) {
-			html_ntxt(name, ctx.cfg.max_msg_len - 3);
-			html("...");
-		} else
-			html_txt(name);
-	} else
+	/* dumps: no commit page; show the subject as text. */
+	if (name[0] == '\0')
 		html_txt("(no commit message)");
-	html("</a>");
+	else if (strlen(name) > ctx.cfg.max_msg_len && ctx.cfg.max_msg_len >= 15) {
+		html_ntxt(name, ctx.cfg.max_msg_len - 3);
+		html("...");
+	} else
+		html_txt(name);
 }
 
 void cgit_refs_link(const char *name, const char *title, const char *class,
@@ -585,16 +522,16 @@ void cgit_object_link(struct object *obj)
 	fullrev = oid_to_hex(&obj->oid);
 	shortrev = xstrdup(fullrev);
 	shortrev[10] = '\0';
-	if (obj->type == OBJ_COMMIT) {
-		cgit_commit_link(fmt("commit %s...", shortrev), NULL, NULL,
-				 ctx.qry.head, fullrev, NULL);
-		return;
-	} else if (obj->type == OBJ_TREE)
+	/* dumps: no commit or blob pages; browse a commit's tree instead. */
+	if (obj->type == OBJ_COMMIT || obj->type == OBJ_TREE)
 		page = "tree";
 	else if (obj->type == OBJ_TAG)
 		page = "tag";
-	else
-		page = "blob";
+	else {
+		html_txt(fmt("%s %s...", type_name(obj->type), shortrev));
+		free(shortrev);
+		return;
+	}
 	name = fmt("%s %s...", type_name(obj->type), shortrev);
 	reporevlink(page, name, NULL, NULL, ctx.qry.head, fullrev, NULL);
 }
@@ -837,21 +774,7 @@ void cgit_print_docstart(void)
 		html_attr(ctx.cfg.favicon);
 		html("'/>\n");
 	}
-	if (host && ctx.repo && ctx.qry.head) {
-		char *fileurl;
-		struct strbuf sb = STRBUF_INIT;
-		strbuf_addf(&sb, "h=%s", ctx.qry.head);
-
-		html("<link rel='alternate' title='Atom feed' href='");
-		html(cgit_httpscheme());
-		html_attr(host);
-		fileurl = cgit_fileurl(ctx.repo->url, "atom", ctx.qry.vpath,
-				       sb.buf);
-		html_attr(fileurl);
-		html("' type='application/atom+xml'/>\n");
-		strbuf_release(&sb);
-		free(fileurl);
-	}
+	/* dumps: no Atom feed page, so no feed <link>. */
 	if (ctx.repo)
 		cgit_add_clone_urls(print_rel_vcs_link);
 	if (ctx.cfg.head_include)
@@ -1094,48 +1017,13 @@ void cgit_print_pageheader(void)
 				  ctx.qry.head);
 		cgit_refs_link("refs", NULL, hc("refs"), ctx.qry.head,
 			       ctx.qry.oid, NULL);
-		cgit_log_link("log", NULL, hc("log"), ctx.qry.head,
-			      NULL, ctx.qry.vpath, 0, NULL, NULL,
-			      ctx.qry.showmsg, ctx.qry.follow);
-		if (ctx.qry.page && !strcmp(ctx.qry.page, "blame"))
-			cgit_blame_link("blame", NULL, hc("blame"), ctx.qry.head,
-				        ctx.qry.oid, ctx.qry.vpath);
-		else
-			cgit_tree_link("tree", NULL, hc("tree"), ctx.qry.head,
-				       ctx.qry.oid, ctx.qry.vpath);
-		cgit_commit_link("commit", NULL, hc("commit"),
-				 ctx.qry.head, ctx.qry.oid, ctx.qry.vpath);
-		cgit_diff_link("diff", NULL, hc("diff"), ctx.qry.head,
-			       ctx.qry.oid, ctx.qry.oid2, ctx.qry.vpath);
-		if (ctx.repo->max_stats)
-			cgit_stats_link("stats", NULL, hc("stats"),
-					ctx.qry.head, ctx.qry.vpath);
+		cgit_tree_link("tree", NULL, hc("tree"), ctx.qry.head,
+			       ctx.qry.oid, ctx.qry.vpath);
 		if (ctx.repo->homepage) {
 			html("<a href='");
 			html_attr(ctx.repo->homepage);
 			html("'>homepage</a>");
 		}
-		html("</td><td class='form'>");
-		html("<form class='right' method='get' action='");
-		if (ctx.cfg.virtual_root) {
-			char *fileurl = cgit_fileurl(ctx.qry.repo, "log",
-						   ctx.qry.vpath, NULL);
-			html_url_path(fileurl);
-			free(fileurl);
-		}
-		html("'>\n");
-		cgit_add_hidden_formfields(1, 0, "log");
-		html("<select name='qt'>\n");
-		html_option("grep", "log msg", ctx.qry.grep);
-		html_option("author", "author", ctx.qry.grep);
-		html_option("committer", "committer", ctx.qry.grep);
-		html_option("range", "range", ctx.qry.grep);
-		html("</select>\n");
-		html("<input class='txt' type='search' size='10' name='q' value='");
-		html_attr(ctx.qry.search);
-		html("'/>\n");
-		html("<input type='submit' value='search'/>\n");
-		html("</form>\n");
 	} else if (ctx.env.authenticated) {
 		char *currenturl = cgit_currenturl();
 		site_link(NULL, "index", NULL, hc("repolist"), NULL, NULL, 0, 1);

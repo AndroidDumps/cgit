@@ -12,27 +12,38 @@
 #include "ui-plain.h"
 #include "html.h"
 #include "ui-shared.h"
+#include "odb/streaming.h"
 
 struct walk_tree_context {
 	int match_baselen;
 	int match;
 };
 
+/*
+ * dumps: stream blobs instead of loading them whole. Firmware dumps hold
+ * files of hundreds of MB; upstream read each one fully into memory per
+ * request.
+ */
 static int print_object(const struct object_id *oid, const char *path)
 {
-	enum object_type type;
-	char *buf, *mimetype;
-	unsigned long size;
+	struct odb_read_stream *st;
+	char *mimetype;
+	static char buf[65536];
+	ssize_t n;
 
-	type = odb_read_object_info(the_repository->objects, oid, &size);
-	if (type == OBJ_BAD) {
+	st = odb_read_stream_open(the_repository->objects, oid, NULL);
+	if (!st || st->type != OBJ_BLOB) {
+		if (st)
+			odb_read_stream_close(st);
 		cgit_print_error_page(404, "Not found", "Not found");
 		return 0;
 	}
 
-	buf = odb_read_object(the_repository->objects, oid, &type, &size);
-	if (!buf) {
-		cgit_print_error_page(404, "Not found", "Not found");
+	n = odb_read_stream_read(st, buf, sizeof(buf));
+	if (n < 0) {
+		odb_read_stream_close(st);
+		cgit_print_error_page(500, "Internal server error",
+				      "Error reading object");
 		return 0;
 	}
 
@@ -50,7 +61,8 @@ static int print_object(const struct object_id *oid, const char *path)
 	}
 
 	if (!ctx.page.mimetype) {
-		if (buffer_is_binary(buf, size)) {
+		/* Sniff the first chunk, like git's buffer_is_binary() does. */
+		if (buffer_is_binary(buf, n)) {
 			ctx.page.mimetype = "application/octet-stream";
 			ctx.page.charset = NULL;
 		} else {
@@ -58,12 +70,15 @@ static int print_object(const struct object_id *oid, const char *path)
 		}
 	}
 	ctx.page.filename = path;
-	ctx.page.size = size;
+	ctx.page.size = st->size;
 	ctx.page.etag = oid_to_hex(oid);
 	cgit_print_http_headers();
-	html_raw(buf, size);
+	while (n > 0) {
+		html_raw(buf, n);
+		n = odb_read_stream_read(st, buf, sizeof(buf));
+	}
+	odb_read_stream_close(st);
 	free(mimetype);
-	free(buf);
 	return 1;
 }
 
