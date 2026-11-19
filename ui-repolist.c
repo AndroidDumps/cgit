@@ -270,6 +270,56 @@ static int sort_repolist(char *field)
 }
 
 
+/*
+ * dumps: the bare index lists groups (repo sections, e.g. "dumps/xiaomi")
+ * with their repo counts instead of thousands of repos. Searching (?q=),
+ * a group page (/<group>/) or ?all=1 shows repos as usual.
+ */
+static int print_group_index(void)
+{
+	int i, n = 0, total = 0, groups = 0;
+	const char *cur = NULL;
+
+	html("<table summary='group list' class='list nowrap'>");
+	html("<tr class='nohover'><th class='left'>Group</th>"
+	     "<th class='left'>Repositories</th></tr>\n");
+	for (i = 0; i <= cgit_repolist.count; i++) {
+		struct cgit_repo *repo = i < cgit_repolist.count ?
+			&cgit_repolist.repos[i] : NULL;
+		const char *sec;
+
+		if (repo && !is_visible(repo))
+			continue;
+		sec = repo ? (repo->section ? repo->section : "") : NULL;
+		if (cur && (!sec || strcmp(sec, cur))) {
+			html("<tr><td class='toplevel-repo'>");
+			if (*cur) {
+				html("<a href='");
+				html_url_path(ctx.cfg.virtual_root ? ctx.cfg.virtual_root : "/");
+				html_url_path(cur);
+				html("/'>");
+				html_txt(cur);
+				html("</a>");
+			} else
+				html("(no group)");
+			htmlf("</td><td>%d</td></tr>\n", n);
+			groups++;
+			n = 0;
+		}
+		if (!repo)
+			break;
+		cur = sec;
+		n++;
+		total++;
+	}
+	html("</table>");
+	htmlf("<p>%d repositories in %d groups. ", total, groups);
+	html("<a href='");
+	html_url_path(ctx.cfg.virtual_root ? ctx.cfg.virtual_root : "/");
+	html("?all=1'>Show all repositories</a>, or use search.</p>");
+	return groups;
+}
+
 void cgit_print_repolist(void)
 {
 	int i, columns = 3, hits = 0, header = 0;
@@ -297,6 +347,15 @@ void cgit_print_repolist(void)
 		sorted = sort_repolist(ctx.qry.sort);
 	else if (ctx.cfg.section_sort)
 		sort_repolist("section");
+
+	if (!ctx.qry.search && (!ctx.qry.url || !*ctx.qry.url) &&
+	    !ctx.qry.showall && !sorted) {
+		if (!ctx.qry.sort)
+			sort_repolist("section");
+		print_group_index();
+		cgit_print_docend();
+		return;
+	}
 
 	html("<table summary='repository list' class='list nowrap'>");
 	for (i = 0; i < cgit_repolist.count; i++) {

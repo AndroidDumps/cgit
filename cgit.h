@@ -185,6 +185,7 @@ struct cgit_query {
 	int nohead;
 	char *sort;
 	int showmsg;
+	int showall; /* dumps: list repos, not groups, on the index */
 	diff_type difftype;
 	int show_all;
 	int context;

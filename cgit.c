@@ -354,6 +354,8 @@ static void querystring_cb(const char *name, const char *value)
 		ctx.qry.sort = xstrdup(value);
 	} else if (!strcmp(name, "showmsg")) {
 		ctx.qry.showmsg = atoi(value);
+	} else if (!strcmp(name, "all")) {
+		ctx.qry.showall = atoi(value);
 	} else if (!strcmp(name, "period")) {
 		ctx.qry.period = xstrdup(value);
 	} else if (!strcmp(name, "dt")) {

@@ -232,6 +232,11 @@ static void site_url(const char *page, const char *search, const char *sort, int
 	if (ofs) {
 		html(delim);
 		htmlf("ofs=%d", ofs);
+		delim = "&amp;";
+	}
+	if (ctx.qry.showall) {
+		html(delim);
+		html("all=1");
 	}
 }
 
