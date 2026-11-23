@@ -27,24 +27,34 @@
 static void find_repo_ignoring_case(const char *url)
 {
 	struct cgit_repo *best = NULL;
-	size_t best_len = 0;
+	size_t best_len = 0, url_len = strlen(url);
+	const char *tail;
 	int i;
 
 	for (i = 0; i < cgit_repolist.count; i++) {
 		struct cgit_repo *repo = &cgit_repolist.repos[i];
 		size_t n = strlen(repo->url);
-		const char *rest = url + n;
+		const char *rest;
 
-		if (repo->ignore || n <= best_len || strncasecmp(url, repo->url, n))
+		if (repo->ignore || n <= best_len || n > url_len ||
+		    strncasecmp(url, repo->url, n))
 			continue;
+		rest = url + n;
 		if (*rest && *rest != '/' &&
 		    !(!strncasecmp(rest, ".git", 4) && (!rest[4] || rest[4] == '/')))
 			continue;
 		best = repo;
 		best_len = n;
 	}
-	if (best && strncmp(url, best->url, best_len))
-		ctx.qry.case_redirect = fmtalloc("%s%s", best->url, url + best_len);
+	if (!best)
+		return;
+	/* Drop a ".git" suffix too: repo URLs have none, and the clone location
+	 * in nginx accepts clone URLs without it. */
+	tail = url + best_len;
+	if (!strncasecmp(tail, ".git", 4) && (!tail[4] || tail[4] == '/'))
+		tail += 4;
+	if (strncmp(url, best->url, best_len) || tail != url + best_len)
+		ctx.qry.case_redirect = fmtalloc("%s%s", best->url, tail);
 }
 
 void cgit_parse_url(const char *url)
@@ -88,7 +98,7 @@ void cgit_parse_url(const char *url)
 			ctx.qry.page = xstrdup(cmd + 1);
 	}
 	free(buf);
-	if (!ctx.repo)
+	if (!ctx.repo && ctx.qry.case_lookup)
 		find_repo_ignoring_case(url);
 }
 

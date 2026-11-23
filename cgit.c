@@ -823,8 +823,13 @@ static void process_request(void)
 		html_url_path(ctx.cfg.virtual_root);
 		html_url_path(ctx.qry.case_redirect);
 		if (ctx.env.query_string && *ctx.env.query_string) {
-			html("?");
-			html(ctx.env.query_string);
+			const char *q = ctx.env.query_string;
+			while (*q > 0x20 && *q < 0x7f)
+				q++;
+			if (!*q) {	/* never copy control bytes into a header */
+				html("?");
+				html(ctx.env.query_string);
+			}
 		}
 		html("\n\n");
 		return;
@@ -1189,6 +1194,9 @@ int cmd_main(int argc, const char **argv)
 			ctx.qry.raw = newqry;
 		} else
 			ctx.qry.raw = xstrdup(ctx.qry.url);
+		/* dumps: only path URLs get the case redirect; a ?url= one would be
+		 * passed back in the Location and loop. */
+		ctx.qry.case_lookup = 1;
 		cgit_parse_url(ctx.qry.url);
 	}
 
