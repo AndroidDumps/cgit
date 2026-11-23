@@ -103,7 +103,8 @@ static int is_in_url(struct cgit_repo *repo)
 		return 1;
 	/* dumps: match whole path components, so "dumps/xiaomi" does not
 	 * also list "dumps/xiaomipad/...". */
-	if (repo->url && starts_with(repo->url, ctx.qry.url)) {
+	/* dumps: group pages ignore case too, like the repo lookup. */
+	if (repo->url && !strncasecmp(repo->url, ctx.qry.url, strlen(ctx.qry.url))) {
 		size_t n = strlen(ctx.qry.url);
 		if (!n || ctx.qry.url[n - 1] == '/' || repo->url[n] == '/' || !repo->url[n])
 			return 1;

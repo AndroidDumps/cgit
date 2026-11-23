@@ -817,6 +817,19 @@ static void process_request(void)
 	if (ctx.repo)
 		prepare_repo_env(&nongit);
 
+	if (ctx.qry.case_redirect && ctx.cfg.virtual_root) {
+		html("Status: 301 Moved\n");
+		html("Location: ");
+		html_url_path(ctx.cfg.virtual_root);
+		html_url_path(ctx.qry.case_redirect);
+		if (ctx.env.query_string && *ctx.env.query_string) {
+			html("?");
+			html(ctx.env.query_string);
+		}
+		html("\n\n");
+		return;
+	}
+
 	cmd = cgit_get_cmd();
 	if (!cmd) {
 		ctx.page.title = "cgit error";

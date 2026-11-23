@@ -186,6 +186,7 @@ struct cgit_query {
 	char *sort;
 	int showmsg;
 	int showall; /* dumps: list repos, not groups, on the index */
+	char *case_redirect; /* dumps: canonical url when only the case differed */
 	diff_type difftype;
 	int show_all;
 	int context;

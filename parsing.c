@@ -17,6 +17,36 @@
  *   path: any valid path, may contain '/'
  *
  */
+/*
+ * dumps: GitLab looked paths up ignoring case, so old links use other
+ * spellings (dumps/nothing/Pong for dumps/nothing/pong). When nothing matched
+ * exactly, find the longest repo url that equals a leading run of path
+ * components ignoring case (the repo component may carry a ".git" suffix, as
+ * in clone URLs) and request a redirect to the canonical spelling.
+ */
+static void find_repo_ignoring_case(const char *url)
+{
+	struct cgit_repo *best = NULL;
+	size_t best_len = 0;
+	int i;
+
+	for (i = 0; i < cgit_repolist.count; i++) {
+		struct cgit_repo *repo = &cgit_repolist.repos[i];
+		size_t n = strlen(repo->url);
+		const char *rest = url + n;
+
+		if (repo->ignore || n <= best_len || strncasecmp(url, repo->url, n))
+			continue;
+		if (*rest && *rest != '/' &&
+		    !(!strncasecmp(rest, ".git", 4) && (!rest[4] || rest[4] == '/')))
+			continue;
+		best = repo;
+		best_len = n;
+	}
+	if (best && strncmp(url, best->url, best_len))
+		ctx.qry.case_redirect = fmtalloc("%s%s", best->url, url + best_len);
+}
+
 void cgit_parse_url(const char *url)
 {
 	char *c, *cmd, *p, *buf;
@@ -58,6 +88,8 @@ void cgit_parse_url(const char *url)
 			ctx.qry.page = xstrdup(cmd + 1);
 	}
 	free(buf);
+	if (!ctx.repo)
+		find_repo_ignoring_case(url);
 }
 
 static char *substr(const char *head, const char *tail)
